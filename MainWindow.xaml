@@ -1,0 +1,41 @@
+﻿<Window x:Class="ScreenRecorder.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Screen Recorder" Height="420" Width="400"
+        WindowStartupLocation="CenterScreen" Background="#f3f3f3">
+    <Border Margin="10" Padding="15" Background="White" CornerRadius="10" BorderBrush="#ccc" BorderThickness="1">
+        <StackPanel>
+
+            <TextBlock Text="Screen Recorder" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" Margin="0 0 0 10"/>
+
+            <TextBlock Text="Select Audio Source:" FontWeight="SemiBold" Margin="0 0 0 4"/>
+            <ComboBox x:Name="cmbAudioSourceType" Width="250" Margin="0 0 0 10" HorizontalAlignment="Center" SelectionChanged="cmbAudioSourceType_SelectionChanged">
+                <ComboBoxItem Tag="none" IsSelected="True">No Audio</ComboBoxItem>
+                <ComboBoxItem Tag="system">System Audio</ComboBoxItem>
+                <ComboBoxItem Tag="mic">Microphone</ComboBoxItem>
+                <ComboBoxItem Tag="both">System + Microphone</ComboBoxItem>
+            </ComboBox>
+
+            <TextBlock Text="Select Audio Device:" FontWeight="SemiBold" Margin="0 0 0 4"/>
+            <ComboBox x:Name="cmbAudioDevices" Width="250" Margin="0 0 0 15" HorizontalAlignment="Center" IsEnabled="False" />
+
+            <Button x:Name="btnBrowse" Content="📁 Browse Output Path" Click="BtnBrowse_Click" Width="Auto" Margin="0 0 0 5" Padding="5" />
+            <TextBlock x:Name="txtOutputPath" Text="No path selected" TextWrapping="Wrap" TextAlignment="Center" Foreground="Gray" Margin="0 0 0 10"/>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0 0 0 10">
+                <Button x:Name="btnStart" Content="▶ Start Recording" Click="BtnStart_Click" Width="150" Margin="5" Padding="5" Background="#4CAF50" Foreground="White"/>
+                <Button x:Name="btnStop" Content="■ Stop Recording" Click="BtnStop_Click" Width="150" Margin="5" Padding="5" Background="#F44336" Foreground="White" IsEnabled="False"/>
+            </StackPanel>
+
+            <Button x:Name="btnPause" Content="⏸ Pause" Click="BtnPause_Click" Width="150" Margin="0 0 0 10" Padding="5" Background="#FFC107" Foreground="White" HorizontalAlignment="Center" IsEnabled="False"/>
+
+            <TextBlock x:Name="txtElapsed" Text="Time Elapsed: 00:00:00" FontSize="14" HorizontalAlignment="Center" Foreground="#444" Margin="0 0 0 10"/>
+
+            <StackPanel HorizontalAlignment="Center" Margin="0 10 0 0">
+                <TextBlock Text="Developed by Israk Ahmed" FontSize="12" Foreground="#666" HorizontalAlignment="Center"/>
+                <TextBlock Text="israkahmed7@gmail.com" FontSize="12" Foreground="#007ACC" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+        </StackPanel>
+    </Border>
+</Window>

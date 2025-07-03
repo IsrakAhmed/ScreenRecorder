@@ -1,0 +1,87 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|h:\\study\\projects\\screenrecorder\\screenrecorder\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|solutionrelative:mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|h:\\study\\projects\\screenrecorder\\screenrecorder\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|solutionrelative:mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|h:\\study\\projects\\screenrecorder\\screenrecorder\\app.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|solutionrelative:app.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|h:\\study\\projects\\screenrecorder\\screenrecorder\\screenrecorder.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
+      "RelativeMoniker": "D:0:0:{635F6905-D008-4C4E-809D-C970A9560C06}|ScreenRecorder.csproj|solutionrelative:screenrecorder.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "MainWindow.xaml.cs",
+              "ToolTip": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\MainWindow.xaml.cs",
+              "RelativeToolTip": "MainWindow.xaml.cs",
+              "ViewState": "AgIAAE8BAAAAAAAAAAAwwFUBAAAyAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-02T03:23:53.232Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "App.xaml.cs",
+              "DocumentMoniker": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\App.xaml.cs",
+              "RelativeDocumentMoniker": "App.xaml.cs",
+              "ToolTip": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\App.xaml.cs",
+              "RelativeToolTip": "App.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAA0AAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-03T17:43:17.342Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "ScreenRecorder",
+              "DocumentMoniker": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\ScreenRecorder.csproj",
+              "RelativeDocumentMoniker": "ScreenRecorder.csproj",
+              "ToolTip": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\ScreenRecorder.csproj",
+              "RelativeToolTip": "ScreenRecorder.csproj",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2025-07-03T17:30:41.619Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "MainWindow.xaml",
+              "DocumentMoniker": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\MainWindow.xaml",
+              "RelativeDocumentMoniker": "MainWindow.xaml",
+              "ToolTip": "H:\\Study\\Projects\\ScreenRecorder\\ScreenRecorder\\MainWindow.xaml",
+              "RelativeToolTip": "MainWindow.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2025-07-02T03:23:58.023Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
