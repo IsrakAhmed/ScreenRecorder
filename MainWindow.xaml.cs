@@ -1,5 +1,7 @@
 ﻿using Microsoft.Win32;
 using NAudio.CoreAudioApi;
+using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -7,6 +9,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -18,7 +21,8 @@ namespace ScreenRecorder
         private Process ffmpegProcess;
         private string outputFilePath;
         private string tempDir;
-        private List<string> segmentFiles;
+        private List<string> videoSegmentFiles;
+        private List<string> audioSegmentFiles;
         private DispatcherTimer timer;
         private DateTime startTime;
         private TimeSpan pausedTime;
@@ -26,9 +30,18 @@ namespace ScreenRecorder
         private string systemAudioDevice = null;
         private string micAudioDevice = null;
         private int segmentCount;
+        private WasapiCapture micCapture;
+        private WasapiLoopbackCapture desktopCapture;
+        private WaveFileWriter audioWriter;
+        private BufferedWaveProvider micBuffer;
+        private BufferedWaveProvider desktopBuffer;
+        private CancellationTokenSource audioCts;
 
         private AppSettings settings;
         private readonly string settingsFile = "settings.json";
+        private const float MicGain = 1.0f;
+        private const float DesktopGain = 1.2f; // Reduced to minimize noise amplification
+        private readonly WaveFormat targetFormat = new WaveFormat(48000, 16, 2); // Consistent target format
 
         public MainWindow()
         {
@@ -36,7 +49,8 @@ namespace ScreenRecorder
             this.Loaded += MainWindow_Loaded;
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             timer.Tick += Timer_Tick;
-            segmentFiles = new List<string>();
+            videoSegmentFiles = new List<string>();
+            audioSegmentFiles = new List<string>();
             segmentCount = 0;
         }
 
@@ -70,7 +84,9 @@ namespace ScreenRecorder
                 settings = new AppSettings
                 {
                     BasePath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                    AudioSourceType = "none"
+                    AudioSourceType = "none",
+                    SystemAudioDevice = null,
+                    MicAudioDevice = null
                 };
             }
         }
@@ -78,173 +94,58 @@ namespace ScreenRecorder
         private void SaveSettings()
         {
             settings.AudioSourceType = (cmbAudioSourceType.SelectedItem as ComboBoxItem)?.Tag?.ToString();
-            settings.SelectedDevice = cmbAudioDevices.SelectedItem?.ToString();
+            settings.SystemAudioDevice = systemAudioDevice;
+            settings.MicAudioDevice = micAudioDevice;
             File.WriteAllText(settingsFile, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
         }
 
         private void LoadAudioDevices()
         {
             var enumerator = new MMDeviceEnumerator();
-            var wasapiDevices = GetFFmpegWasapiDevices();
-            var dshowDevices = GetFFmpegDshowDevices();
-            var allDevices = new List<string>();
-            allDevices.AddRange(wasapiDevices);
-            allDevices.AddRange(dshowDevices.FindAll(d => !wasapiDevices.Contains(d))); // Avoid duplicates
-            Debug.WriteLine("FFmpeg WASAPI devices: " + (wasapiDevices.Count > 0 ? string.Join(", ", wasapiDevices) : "None detected"));
-            Debug.WriteLine("FFmpeg DirectShow devices: " + (dshowDevices.Count > 0 ? string.Join(", ", dshowDevices) : "None detected"));
+            var captureDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
+            var renderDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
 
             try
             {
                 var defaultOut = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                 systemAudioDevice = defaultOut.FriendlyName;
-                Debug.WriteLine($"System audio device detected (NAudio): {systemAudioDevice}");
-                systemAudioDevice = FindMatchingDevice(systemAudioDevice, wasapiDevices, "output") ?? FindMatchingDevice(systemAudioDevice, dshowDevices, "output");
-
-                // Fallback to Stereo Mix for system audio
-                if (dshowDevices.Contains("Stereo Mix (Realtek(R) Audio)") && !ValidateAudioDevice(systemAudioDevice))
-                {
-                    systemAudioDevice = "Stereo Mix (Realtek(R) Audio)";
-                    Debug.WriteLine("Falling back to Stereo Mix (Realtek(R) Audio) for system audio.");
-                }
+                Debug.WriteLine($"System audio device detected: {systemAudioDevice}");
 
                 var defaultMic = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
                 micAudioDevice = defaultMic.FriendlyName;
-                Debug.WriteLine($"Microphone device detected (NAudio): {micAudioDevice}");
-                micAudioDevice = FindMatchingDevice(micAudioDevice, wasapiDevices, "input") ?? FindMatchingDevice(micAudioDevice, dshowDevices, "input");
+                Debug.WriteLine($"Microphone device detected: {micAudioDevice}");
 
-                Debug.WriteLine($"System audio device selected: {systemAudioDevice}");
-                Debug.WriteLine($"Microphone device selected: {micAudioDevice}");
+                var allDevices = new List<string>();
+                foreach (var device in renderDevices)
+                    allDevices.Add(device.FriendlyName);
+                foreach (var device in captureDevices)
+                    if (!allDevices.Contains(device.FriendlyName))
+                        allDevices.Add(device.FriendlyName);
 
-                if (string.IsNullOrEmpty(systemAudioDevice) || string.IsNullOrEmpty(micAudioDevice))
-                {
-                    System.Windows.MessageBox.Show("Could not match audio devices with FFmpeg. Please select devices manually from the list.");
-                    cmbAudioDevices.ItemsSource = allDevices;
-                }
-                else
-                {
-                    cmbAudioDevices.ItemsSource = new List<string> { systemAudioDevice, micAudioDevice };
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Windows.MessageBox.Show($"Error detecting audio devices: {ex.Message}\nPlease select devices manually.");
                 cmbAudioDevices.ItemsSource = allDevices;
-            }
 
-            if (!string.IsNullOrEmpty(settings.SelectedDevice) && cmbAudioDevices.Items.Contains(settings.SelectedDevice))
-                cmbAudioDevices.SelectedItem = settings.SelectedDevice;
-        }
-
-        private List<string> GetFFmpegWasapiDevices()
-        {
-            var devices = new List<string>();
-            try
-            {
-                var process = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "ffmpeg",
-                        Arguments = "-list_devices true -f wasapi -i dummy",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardError = true,
-                        RedirectStandardOutput = true
-                    }
-                };
-
-                StringBuilder output = new StringBuilder();
-                process.ErrorDataReceived += (s, ev) => { if (ev.Data != null) output.AppendLine(ev.Data); };
-                process.Start();
-                process.BeginErrorReadLine();
-                process.WaitForExit(5000);
-
-                string[] lines = output.ToString().Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (string line in lines)
-                {
-                    if (line.Contains("(audio)") && line.Contains("wasapi"))
-                    {
-                        int startIndex = line.IndexOf('"') + 1;
-                        int endIndex = line.LastIndexOf('"');
-                        if (startIndex > 0 && endIndex > startIndex)
-                        {
-                            string deviceName = line.Substring(startIndex, endIndex - startIndex);
-                            devices.Add(deviceName);
-                        }
-                    }
-                }
+                if (!string.IsNullOrEmpty(settings.SystemAudioDevice) && allDevices.Contains(settings.SystemAudioDevice))
+                    systemAudioDevice = settings.SystemAudioDevice;
+                if (!string.IsNullOrEmpty(settings.MicAudioDevice) && allDevices.Contains(settings.MicAudioDevice))
+                    micAudioDevice = settings.MicAudioDevice;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error listing FFmpeg WASAPI devices: {ex.Message}");
+                Debug.WriteLine($"Error detecting audio devices: {ex.Message}");
+                System.Windows.MessageBox.Show($"Error detecting audio devices: {ex.Message}\nPlease select devices manually.");
             }
-            return devices;
         }
 
-        private List<string> GetFFmpegDshowDevices()
+        private MMDevice FindDevice(string deviceName, DataFlow flow)
         {
-            var devices = new List<string>();
-            try
+            var enumerator = new MMDeviceEnumerator();
+            var devices = enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active);
+            foreach (var device in devices)
             {
-                var process = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "ffmpeg",
-                        Arguments = "-list_devices true -f dshow -i dummy",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardError = true,
-                        RedirectStandardOutput = true
-                    }
-                };
-
-                StringBuilder output = new StringBuilder();
-                process.ErrorDataReceived += (s, ev) => { if (ev.Data != null) output.AppendLine(ev.Data); };
-                process.Start();
-                process.BeginErrorReadLine();
-                process.WaitForExit(5000);
-
-                string[] lines = output.ToString().Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (string line in lines)
-                {
-                    if (line.Contains("(audio)") && line.Contains("dshow"))
-                    {
-                        int startIndex = line.IndexOf('"') + 1;
-                        int endIndex = line.LastIndexOf('"');
-                        if (startIndex > 0 && endIndex > startIndex)
-                        {
-                            string deviceName = line.Substring(startIndex, endIndex - startIndex);
-                            devices.Add(deviceName);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error listing FFmpeg DirectShow devices: {ex.Message}");
-            }
-            return devices;
-        }
-
-        private string FindMatchingDevice(string naudioDevice, List<string> ffmpegDevices, string deviceType)
-        {
-            if (string.IsNullOrEmpty(naudioDevice) || ffmpegDevices == null || ffmpegDevices.Count == 0)
-                return naudioDevice;
-
-            foreach (var device in ffmpegDevices)
-            {
-                bool isMatch = device.Contains(naudioDevice, StringComparison.OrdinalIgnoreCase) ||
-                               naudioDevice.Contains(device, StringComparison.OrdinalIgnoreCase) ||
-                               (device.ToLower().Contains("realtek") && naudioDevice.ToLower().Contains("realtek"));
-                bool isCorrectType = (deviceType == "output" && (device.ToLower().Contains("speaker") || device.ToLower().Contains("output") || device.ToLower().Contains("stereo mix"))) ||
-                                    (deviceType == "input" && (device.ToLower().Contains("mic") || device.ToLower().Contains("input")));
-                if (isMatch && isCorrectType)
-                {
+                if (device.FriendlyName.Equals(deviceName, StringComparison.OrdinalIgnoreCase))
                     return device;
-                }
             }
-            return null; // Return null to trigger fallback
+            return null;
         }
 
         private void Timer_Tick(object sender, EventArgs e)
@@ -315,182 +216,261 @@ namespace ScreenRecorder
             }
         }
 
-        private bool ValidateAudioDevice(string deviceName, bool useDirectShow = false)
-        {
-            if (string.IsNullOrEmpty(deviceName))
-            {
-                Debug.WriteLine("Audio device validation failed: Device name is empty.");
-                return false;
-            }
-
-            for (int attempt = 1; attempt <= 3; attempt++)
-            {
-                string inputFormat = useDirectShow ? "dshow" : "wasapi"; // Moved outside try block
-                try
-                {
-                    string arguments = useDirectShow
-                        ? $"-f dshow -i audio=\"{deviceName}\" -t 1 -f null -"
-                        : $"-f wasapi -i audio=\"{deviceName}\" -t 1 -f null -";
-
-                    var process = new Process
-                    {
-                        StartInfo = new ProcessStartInfo
-                        {
-                            FileName = "ffmpeg",
-                            Arguments = arguments,
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                            RedirectStandardError = true,
-                            RedirectStandardOutput = true
-                        }
-                    };
-
-                    StringBuilder errorOutput = new StringBuilder();
-                    process.ErrorDataReceived += (s, ev) => { if (ev.Data != null) errorOutput.AppendLine(ev.Data); };
-                    process.Start();
-                    process.BeginErrorReadLine();
-                    process.WaitForExit(5000);
-
-                    if (process.ExitCode != 0)
-                    {
-                        Debug.WriteLine($"Audio device validation failed for '{deviceName}' (using {inputFormat}, attempt {attempt}): {errorOutput.ToString()}");
-                        if (attempt < 3) Thread.Sleep(1000);
-                        continue;
-                    }
-                    Debug.WriteLine($"Audio device validation succeeded for '{deviceName}' (using {inputFormat}).");
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Error validating audio device '{deviceName}' (using {inputFormat}, attempt {attempt}): {ex.Message}");
-                    if (attempt < 3) Thread.Sleep(1000);
-                }
-            }
-            return false;
-        }
-
         private void StartFFmpegRecording()
         {
-            string audioSourceType = (cmbAudioSourceType.SelectedItem as ComboBoxItem)?.Tag?.ToString();
-            string segmentFile = Path.Combine(tempDir, $"segment_{segmentCount}.mp4");
-            segmentFiles.Add(segmentFile);
-            segmentCount++;
+            string videoSegmentFile = Path.Combine(tempDir, $"video_segment_{segmentCount}.mp4");
+            videoSegmentFiles.Add(videoSegmentFile);
 
-            string ffmpegArgs = null;
-            bool useDirectShow = false;
+            // Add timestamp to align with audio
+            string ffmpegArgs = $"-y -f gdigrab -framerate 30 -i desktop -c:v libx264 -preset ultrafast -pix_fmt yuv420p -metadata:s:v creation_time=now \"{videoSegmentFile}\"";
+            ffmpegProcess = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "ffmpeg",
+                    Arguments = ffmpegArgs,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardInput = true
+                }
+            };
+
+            ffmpegProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) Debug.WriteLine("[FFmpeg Output] " + ev.Data); };
+            ffmpegProcess.ErrorDataReceived += (s, ev) => { if (ev.Data != null) Debug.WriteLine("[FFmpeg Error] " + ev.Data); };
+
+            ffmpegProcess.Start();
+            ffmpegProcess.BeginOutputReadLine();
+            ffmpegProcess.BeginErrorReadLine();
+        }
+
+        private async Task StartAudioRecordingAsync(string audioSourceType, CancellationToken token)
+        {
+            if (audioSourceType == "none")
+                return;
+
+            string audioSegmentFile = Path.Combine(tempDir, $"audio_segment_{segmentCount}.wav");
+            audioSegmentFiles.Add(audioSegmentFile);
+
+            MMDevice micDevice = null, desktopDevice = null;
+            if (audioSourceType == "mic" || audioSourceType == "both")
+            {
+                micDevice = FindDevice(micAudioDevice, DataFlow.Capture);
+                if (micDevice == null)
+                {
+                    System.Windows.MessageBox.Show($"Microphone device '{micAudioDevice}' not found.");
+                    return;
+                }
+                if (micDevice.State != DeviceState.Active)
+                {
+                    System.Windows.MessageBox.Show($"Microphone device '{micAudioDevice}' is not active.");
+                    return;
+                }
+            }
+            if (audioSourceType == "system" || audioSourceType == "both")
+            {
+                desktopDevice = FindDevice(systemAudioDevice, DataFlow.Render);
+                if (desktopDevice == null)
+                {
+                    System.Windows.MessageBox.Show($"System audio device '{systemAudioDevice}' not found.");
+                    return;
+                }
+                if (desktopDevice.State != DeviceState.Active)
+                {
+                    System.Windows.MessageBox.Show($"System audio device '{systemAudioDevice}' is not active.");
+                    return;
+                }
+            }
 
             try
             {
-                switch (audioSourceType)
+                if (audioSourceType == "mic")
                 {
-                    case "none":
-                        ffmpegArgs = $"-y -f gdigrab -framerate 30 -i desktop -c:v libx264 -preset ultrafast -pix_fmt yuv420p \"{segmentFile}\"";
-                        break;
-
-                    case "system":
-                        if (string.IsNullOrEmpty(systemAudioDevice))
-                        {
-                            System.Windows.MessageBox.Show($"System audio device is not set.");
-                            return;
-                        }
-                        if (!ValidateAudioDevice(systemAudioDevice))
-                        {
-                            Debug.WriteLine($"WASAPI validation failed for system audio. Trying DirectShow...");
-                            if (ValidateAudioDevice(systemAudioDevice, true))
-                            {
-                                useDirectShow = true;
-                            }
-                            else
-                            {
-                                System.Windows.MessageBox.Show($"System audio device '{systemAudioDevice}' is invalid or not accessible with WASAPI or DirectShow.");
-                                return;
-                            }
-                        }
-                        ffmpegArgs = useDirectShow
-                            ? $"-y -f dshow -i audio=\"{systemAudioDevice}\" -f gdigrab -framerate 30 -i desktop -c:v libx264 -preset ultrafast -c:a aac -b:a 192k -pix_fmt yuv420p \"{segmentFile}\""
-                            : $"-y -f wasapi -i audio=\"{systemAudioDevice}\" -f gdigrab -framerate 30 -i desktop -c:v libx264 -preset ultrafast -c:a aac -b:a 192k -pix_fmt yuv420p \"{segmentFile}\"";
-                        break;
-
-                    case "mic":
-                        if (string.IsNullOrEmpty(micAudioDevice))
-                        {
-                            System.Windows.MessageBox.Show($"Microphone device is not set.");
-                            return;
-                        }
-                        if (!ValidateAudioDevice(micAudioDevice))
-                        {
-                            Debug.WriteLine($"WASAPI validation failed for microphone. Trying DirectShow...");
-                            if (ValidateAudioDevice(micAudioDevice, true))
-                            {
-                                useDirectShow = true;
-                            }
-                            else
-                            {
-                                System.Windows.MessageBox.Show($"Microphone device '{micAudioDevice}' is invalid or not accessible with WASAPI or DirectShow.");
-                                return;
-                            }
-                        }
-                        ffmpegArgs = useDirectShow
-                            ? $"-y -f dshow -i audio=\"{micAudioDevice}\" -f gdigrab -framerate 30 -i desktop -c:v libx264 -preset ultrafast -c:a aac -b:a 192k -pix_fmt yuv420p \"{segmentFile}\""
-                            : $"-y -f wasapi -i audio=\"{micAudioDevice}\" -f gdigrab -framerate 30 -i desktop -c:v libx264 -preset ultrafast -c:a aac -b:a 192k -pix_fmt yuv420p \"{segmentFile}\"";
-                        break;
-
-                    case "both":
-                        if (string.IsNullOrEmpty(systemAudioDevice) || string.IsNullOrEmpty(micAudioDevice))
-                        {
-                            System.Windows.MessageBox.Show("Both system and microphone devices must be set.");
-                            return;
-                        }
-                        if (!ValidateAudioDevice(systemAudioDevice) || !ValidateAudioDevice(micAudioDevice))
-                        {
-                            Debug.WriteLine($"WASAPI validation failed for one or both devices. Trying DirectShow...");
-                            if (ValidateAudioDevice(systemAudioDevice, true) && ValidateAudioDevice(micAudioDevice, true))
-                            {
-                                useDirectShow = true;
-                            }
-                            else
-                            {
-                                System.Windows.MessageBox.Show($"One or both devices ('{systemAudioDevice}', '{micAudioDevice}') are invalid or not accessible with WASAPI or DirectShow.");
-                                return;
-                            }
-                        }
-                        ffmpegArgs = useDirectShow
-                            ? $"-y -f dshow -i audio=\"{systemAudioDevice}\" -f dshow -i audio=\"{micAudioDevice}\" -f gdigrab -framerate 30 -i desktop " +
-                              "-filter_complex \"[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=3[a]\" -map 2:v -map \"[a]\" " +
-                              $"-c:v libx264 -preset ultrafast -c:a aac -b:a 192k -pix_fmt yuv420p \"{segmentFile}\""
-                            : $"-y -f wasapi -i audio=\"{systemAudioDevice}\" -f wasapi -i audio=\"{micAudioDevice}\" -f gdigrab -framerate 30 -i desktop " +
-                              "-filter_complex \"[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=3[a]\" -map 2:v -map \"[a]\" " +
-                              $"-c:v libx264 -preset ultrafast -c:a aac -b:a 192k -pix_fmt yuv420p \"{segmentFile}\"";
-                        break;
-                }
-
-                ffmpegProcess = new Process
-                {
-                    StartInfo = new ProcessStartInfo
+                    micCapture = new WasapiCapture(micDevice) { WaveFormat = targetFormat };
+                    micBuffer = new BufferedWaveProvider(micCapture.WaveFormat)
                     {
-                        FileName = "ffmpeg",
-                        Arguments = ffmpegArgs,
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardError = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardInput = true
+                        DiscardOnBufferOverflow = true,
+                        BufferDuration = TimeSpan.FromSeconds(5),
+                        ReadFully = false
+                    };
+                    audioWriter = new WaveFileWriter(audioSegmentFile, micCapture.WaveFormat);
+
+                    micCapture.DataAvailable += (s, a) =>
+                    {
+                        Debug.WriteLine($"Microphone data received: {a.BytesRecorded} bytes");
+                        micBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                        audioWriter.Write(a.Buffer, 0, a.BytesRecorded);
+                    };
+
+                    micCapture.StartRecording();
+                    Debug.WriteLine($"Started microphone recording: {micDevice.FriendlyName}, Format: {micCapture.WaveFormat}");
+                }
+                else if (audioSourceType == "system")
+                {
+                    desktopCapture = new WasapiLoopbackCapture(desktopDevice) { WaveFormat = targetFormat };
+                    desktopBuffer = new BufferedWaveProvider(desktopCapture.WaveFormat)
+                    {
+                        DiscardOnBufferOverflow = true,
+                        BufferDuration = TimeSpan.FromSeconds(5),
+                        ReadFully = false
+                    };
+                    audioWriter = new WaveFileWriter(audioSegmentFile, desktopCapture.WaveFormat);
+
+                    desktopCapture.DataAvailable += (s, a) =>
+                    {
+                        Debug.WriteLine($"Desktop data received: {a.BytesRecorded} bytes");
+                        desktopBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                        audioWriter.Write(a.Buffer, 0, a.BytesRecorded);
+                    };
+
+                    desktopCapture.StartRecording();
+                    Debug.WriteLine($"Started desktop audio recording: {desktopDevice.FriendlyName}, Format: {desktopCapture.WaveFormat}");
+                }
+                else if (audioSourceType == "both")
+                {
+                    micCapture = new WasapiCapture(micDevice) { WaveFormat = targetFormat };
+                    desktopCapture = new WasapiLoopbackCapture(desktopDevice) { WaveFormat = targetFormat };
+                    micBuffer = new BufferedWaveProvider(micCapture.WaveFormat)
+                    {
+                        DiscardOnBufferOverflow = true,
+                        BufferDuration = TimeSpan.FromSeconds(5),
+                        ReadFully = false
+                    };
+                    desktopBuffer = new BufferedWaveProvider(desktopCapture.WaveFormat)
+                    {
+                        DiscardOnBufferOverflow = true,
+                        BufferDuration = TimeSpan.FromSeconds(5),
+                        ReadFully = false
+                    };
+                    audioWriter = new WaveFileWriter(audioSegmentFile, targetFormat);
+
+                    micCapture.DataAvailable += (s, a) =>
+                    {
+                        Debug.WriteLine($"Microphone data received: {a.BytesRecorded} bytes");
+                        micBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                    };
+
+                    desktopCapture.DataAvailable += (s, a) =>
+                    {
+                        Debug.WriteLine($"Desktop data received: {a.BytesRecorded} bytes");
+                        desktopBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                    };
+
+                    micCapture.StartRecording();
+                    desktopCapture.StartRecording();
+                    Debug.WriteLine($"Started microphone recording: {micDevice.FriendlyName}, Format: {micCapture.WaveFormat}");
+                    Debug.WriteLine($"Started desktop audio recording: {desktopDevice.FriendlyName}, Format: {desktopCapture.WaveFormat}");
+
+                    var micProvider = ConvertToSampleProvider(micBuffer.ToSampleProvider(), targetFormat);
+                    var desktopProvider = ConvertToSampleProvider(desktopBuffer.ToSampleProvider(), targetFormat);
+
+                    // Simple noise gate to suppress low-level noise
+                    float noiseGateThreshold = 0.01f; // Adjust as needed
+                    var floatBuffer = new float[targetFormat.SampleRate * targetFormat.Channels / 50]; // ~20ms buffer (1920 samples)
+                    var micSamples = new float[floatBuffer.Length];
+                    var desktopSamples = new float[floatBuffer.Length];
+
+                    while (!token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            while ((micBuffer.BufferedBytes < 15360 || desktopBuffer.BufferedBytes < 15360) && !token.IsCancellationRequested)
+                            {
+                                Debug.WriteLine($"Waiting for buffer - Mic: {micBuffer.BufferedBytes} bytes, Desktop: {desktopBuffer.BufferedBytes} bytes");
+                                await Task.Delay(50, token);
+                            }
+
+                            int micRead = micProvider.Read(micSamples, 0, floatBuffer.Length);
+                            int desktopRead = desktopProvider.Read(desktopSamples, 0, floatBuffer.Length);
+                            Debug.WriteLine($"Individual reads - Mic: {micRead} samples, Desktop: {desktopRead} samples");
+
+                            float maxMicAmplitude = 0f;
+                            float maxDesktopAmplitude = 0f;
+                            for (int i = 0; i < micRead; i++)
+                                maxMicAmplitude = Math.Max(maxMicAmplitude, Math.Abs(micSamples[i]));
+                            for (int i = 0; i < desktopRead; i++)
+                                maxDesktopAmplitude = Math.Max(maxDesktopAmplitude, Math.Abs(desktopSamples[i]));
+                            Debug.WriteLine($"Max amplitudes - Mic: {maxMicAmplitude:F3}, Desktop: {maxDesktopAmplitude:F3}");
+
+                            int samplesToMix = Math.Min(micRead, desktopRead);
+                            if (samplesToMix > 0)
+                            {
+                                for (int i = 0; i < samplesToMix; i++)
+                                {
+                                    float micSample = Math.Abs(micSamples[i]) > noiseGateThreshold ? micSamples[i] : 0f;
+                                    float desktopSample = Math.Abs(desktopSamples[i]) > noiseGateThreshold ? desktopSamples[i] : 0f;
+                                    float mixedSample = (MicGain * micSample + DesktopGain * desktopSample) / 2.0f;
+                                    floatBuffer[i] = Math.Max(-1.0f, Math.Min(1.0f, mixedSample));
+                                }
+                                audioWriter.WriteSamples(floatBuffer, 0, samplesToMix);
+                                Debug.WriteLine($"Mixed {samplesToMix} samples, Microphone buffer: {micBuffer.BufferedBytes} bytes, Desktop buffer: {desktopBuffer.BufferedBytes} bytes");
+                            }
+                            else
+                            {
+                                Debug.WriteLine($"No samples available (Mic: {micRead}, Desktop: {desktopRead}), Microphone buffer: {micBuffer.BufferedBytes} bytes, Desktop buffer: {desktopBuffer.BufferedBytes} bytes");
+                                micBuffer.ClearBuffer();
+                                desktopBuffer.ClearBuffer();
+                                Debug.WriteLine("Cleared buffers");
+                                await Task.Delay(200, token);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error in mixing loop: {ex.Message}");
+                        }
                     }
-                };
-
-                ffmpegProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) Debug.WriteLine("[FFmpeg Output] " + ev.Data); };
-                ffmpegProcess.ErrorDataReceived += (s, ev) => { if (ev.Data != null) Debug.WriteLine("[FFmpeg Error] " + ev.Data); };
-
-                ffmpegProcess.Start();
-                ffmpegProcess.BeginOutputReadLine();
-                ffmpegProcess.BeginErrorReadLine();
-                Thread.Sleep(2000);
+                }
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show("Failed to start recording: " + ex.Message);
-                ffmpegProcess = null;
+                Debug.WriteLine($"Audio recording error: {ex.Message}");
+                throw;
             }
+        }
+
+        private async Task StopAudioRecordingAsync()
+        {
+            if (micCapture != null)
+            {
+                micCapture.StopRecording();
+                micCapture.Dispose();
+                micCapture = null;
+            }
+            if (desktopCapture != null)
+            {
+                desktopCapture.StopRecording();
+                desktopCapture.Dispose();
+                desktopCapture = null;
+            }
+            if (audioWriter != null)
+            {
+                audioWriter.Flush();
+                audioWriter.Dispose();
+                audioWriter = null;
+            }
+            micBuffer = null;
+            desktopBuffer = null;
+        }
+
+        private static ISampleProvider ConvertToSampleProvider(ISampleProvider sample, WaveFormat target)
+        {
+            Debug.WriteLine($"Converting sample provider format: {sample.WaveFormat} to target: {target}");
+
+            if (sample.WaveFormat.Channels == 1)
+            {
+                Debug.WriteLine("Converting mono to stereo");
+                sample = new MonoToStereoSampleProvider(sample);
+            }
+
+            if (sample.WaveFormat.SampleRate != target.SampleRate ||
+                sample.WaveFormat.Channels != target.Channels)
+            {
+                Debug.WriteLine($"Resampling to {target.SampleRate} Hz");
+                sample = new WdlResamplingSampleProvider(sample, target.SampleRate);
+            }
+
+            return sample;
         }
 
         private void BtnStart_Click(object sender, RoutedEventArgs e)
@@ -507,17 +487,23 @@ namespace ScreenRecorder
                 return;
             }
 
-            segmentFiles.Clear();
+            videoSegmentFiles.Clear();
+            audioSegmentFiles.Clear();
             segmentCount = 0;
 
             try
             {
+                string audioSourceType = (cmbAudioSourceType.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+                audioCts = new CancellationTokenSource();
+                startTime = DateTime.Now; // Set start time before starting captures
                 StartFFmpegRecording();
                 if (ffmpegProcess == null) return;
 
-                startTime = DateTime.Now;
-                pausedTime = TimeSpan.Zero;
-                isPaused = false;
+                if (audioSourceType != "none")
+                {
+                    Task.Run(() => StartAudioRecordingAsync(audioSourceType, audioCts.Token));
+                }
+
                 timer.Start();
                 txtElapsed.Text = "Time Elapsed: 00:00:00";
 
@@ -532,7 +518,7 @@ namespace ScreenRecorder
             }
         }
 
-        private void BtnPause_Click(object sender, RoutedEventArgs e)
+        private async void BtnPause_Click(object sender, RoutedEventArgs e)
         {
             if (ffmpegProcess == null || ffmpegProcess.HasExited) return;
 
@@ -549,12 +535,24 @@ namespace ScreenRecorder
                     ffmpegProcess.Dispose();
                     ffmpegProcess = null;
 
-                    string lastSegment = segmentFiles[segmentFiles.Count - 1];
+                    audioCts?.Cancel();
+                    await StopAudioRecordingAsync();
+
+                    string lastVideoSegment = videoSegmentFiles[videoSegmentFiles.Count - 1];
                     TimeSpan segmentDuration = DateTime.Now - startTime;
-                    if (!File.Exists(lastSegment) || new FileInfo(lastSegment).Length == 0 || segmentDuration.TotalSeconds < 2)
+                    if (!File.Exists(lastVideoSegment) || new FileInfo(lastVideoSegment).Length == 0 || segmentDuration.TotalSeconds < 2)
                     {
-                        Debug.WriteLine($"Invalid segment file: {lastSegment} (Duration: {segmentDuration.TotalSeconds}s, Size: {new FileInfo(lastSegment).Length} bytes)");
-                        segmentFiles.RemoveAt(segmentFiles.Count - 1);
+                        Debug.WriteLine($"Invalid video segment file: {lastVideoSegment} (Duration: {segmentDuration.TotalSeconds}s, Size: {new FileInfo(lastVideoSegment).Length} bytes)");
+                        videoSegmentFiles.RemoveAt(videoSegmentFiles.Count - 1);
+                        if (audioSegmentFiles.Count > 0)
+                        {
+                            string lastAudioSegment = audioSegmentFiles[audioSegmentFiles.Count - 1];
+                            if (!File.Exists(lastAudioSegment) || new FileInfo(lastAudioSegment).Length == 0)
+                            {
+                                Debug.WriteLine($"Invalid audio segment file: {lastAudioSegment} (Size: {new FileInfo(lastAudioSegment).Length} bytes)");
+                                audioSegmentFiles.RemoveAt(audioSegmentFiles.Count - 1);
+                            }
+                        }
                         segmentCount--;
                     }
 
@@ -565,10 +563,18 @@ namespace ScreenRecorder
                 }
                 else
                 {
+                    segmentCount++;
+                    audioCts = new CancellationTokenSource();
+                    startTime = DateTime.Now; // Reset start time for new segment
                     StartFFmpegRecording();
                     if (ffmpegProcess == null) return;
 
-                    startTime = DateTime.Now;
+                    string audioSourceType = (cmbAudioSourceType.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+                    if (audioSourceType != "none")
+                    {
+                        Task.Run(() => StartAudioRecordingAsync(audioSourceType, audioCts.Token));
+                    }
+
                     timer.Start();
                     isPaused = false;
                     btnPause.Content = "⏸ Pause";
@@ -582,48 +588,56 @@ namespace ScreenRecorder
 
         private void MergeSegments()
         {
-            if (segmentFiles.Count == 0)
+            if (videoSegmentFiles.Count == 0)
             {
-                Debug.WriteLine("No segments to merge.");
+                Debug.WriteLine("No video segments to merge.");
                 return;
             }
 
-            for (int i = segmentFiles.Count - 1; i >= 0; i--)
+            for (int i = videoSegmentFiles.Count - 1; i >= 0; i--)
             {
-                if (!File.Exists(segmentFiles[i]) || new FileInfo(segmentFiles[i]).Length == 0)
+                if (!File.Exists(videoSegmentFiles[i]) || new FileInfo(videoSegmentFiles[i]).Length == 0)
                 {
-                    Debug.WriteLine($"Invalid or missing segment file: {segmentFiles[i]}");
-                    segmentFiles.RemoveAt(i);
+                    Debug.WriteLine($"Invalid or missing video segment file: {videoSegmentFiles[i]}");
+                    videoSegmentFiles.RemoveAt(i);
+                    if (i < audioSegmentFiles.Count)
+                    {
+                        Debug.WriteLine($"Removing corresponding audio segment file: {audioSegmentFiles[i]}");
+                        audioSegmentFiles.RemoveAt(i);
+                    }
                 }
             }
 
-            if (segmentFiles.Count == 0)
+            if (videoSegmentFiles.Count == 0)
             {
-                Debug.WriteLine("No valid segments found for merging.");
+                Debug.WriteLine("No valid video segments found for merging.");
                 return;
             }
 
             string concatFile = Path.Combine(tempDir, "concat.txt");
-            StringBuilder concatContent = new StringBuilder();
-            foreach (string segment in segmentFiles)
-            {
-                string escapedSegment = segment.Replace("'", "'\\''").Replace("\\", "/");
-                concatContent.AppendLine($"file '{escapedSegment}'");
-            }
+            string tempAudioFile = Path.Combine(tempDir, "merged_audio.wav");
+            string tempVideoFile = Path.Combine(tempDir, "merged_video.mp4");
 
             Process mergeProcess = null;
             try
             {
+                // Merge video segments
+                StringBuilder concatContent = new StringBuilder();
+                foreach (string segment in videoSegmentFiles)
+                {
+                    string escapedSegment = segment.Replace("'", "'\\''").Replace("\\", "/");
+                    concatContent.AppendLine($"file '{escapedSegment}'");
+                }
                 File.WriteAllText(concatFile, concatContent.ToString());
-                Debug.WriteLine($"Concat file content:\n{concatContent.ToString()}");
+                Debug.WriteLine($"Video concat file content:\n{concatContent.ToString()}");
 
-                string ffmpegArgs = $"-y -f concat -safe 0 -i \"{concatFile}\" -c copy \"{outputFilePath}\"";
+                string videoMergeArgs = $"-y -f concat -safe 0 -i \"{concatFile}\" -c copy \"{tempVideoFile}\"";
                 mergeProcess = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = "ffmpeg",
-                        Arguments = ffmpegArgs,
+                        Arguments = videoMergeArgs,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         RedirectStandardError = true,
@@ -632,7 +646,7 @@ namespace ScreenRecorder
                 };
 
                 StringBuilder errorOutput = new StringBuilder();
-                mergeProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) Debug.WriteLine("[FFmpeg Merge Output] " + ev.Data); };
+                mergeProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) Debug.WriteLine("[FFmpeg Video Merge Output] " + ev.Data); };
                 mergeProcess.ErrorDataReceived += (s, ev) => { if (ev.Data != null) errorOutput.AppendLine(ev.Data); };
 
                 mergeProcess.Start();
@@ -646,15 +660,91 @@ namespace ScreenRecorder
                     return;
                 }
 
-                if (!File.Exists(outputFilePath) || new FileInfo(outputFilePath).Length == 0)
+                if (!File.Exists(tempVideoFile) || new FileInfo(tempVideoFile).Length == 0)
                 {
-                    System.Windows.MessageBox.Show("Merged output file is invalid or empty.");
+                    System.Windows.MessageBox.Show("Merged video file is invalid or empty.");
                     return;
+                }
+
+                // Merge audio segments if any
+                if (audioSegmentFiles.Count > 0)
+                {
+                    try
+                    {
+                        using (var outputWaveFile = new WaveFileWriter(tempAudioFile, targetFormat))
+                        {
+                            foreach (string audioSegment in audioSegmentFiles)
+                            {
+                                if (!File.Exists(audioSegment))
+                                {
+                                    Debug.WriteLine($"Audio segment file missing: {audioSegment}");
+                                    continue;
+                                }
+
+                                using (var reader = new WaveFileReader(audioSegment))
+                                {
+                                    var provider = ConvertToSampleProvider(reader.ToSampleProvider(), targetFormat);
+                                    var buffer = new float[targetFormat.SampleRate * targetFormat.Channels / 50];
+                                    int samplesRead;
+                                    while ((samplesRead = provider.Read(buffer, 0, buffer.Length)) > 0)
+                                    {
+                                        outputWaveFile.WriteSamples(buffer, 0, samplesRead);
+                                    }
+                                }
+                            }
+                            outputWaveFile.Flush();
+                        }
+
+                        // Combine video and audio with async time base
+                        string finalMergeArgs = $"-y -i \"{tempVideoFile}\" -i \"{tempAudioFile}\" -c:v copy -c:a aac -b:a 192k -map 0:v -map 1:a -shortest -async 1 \"{outputFilePath}\"";
+                        mergeProcess = new Process
+                        {
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = "ffmpeg",
+                                Arguments = finalMergeArgs,
+                                UseShellExecute = false,
+                                CreateNoWindow = true,
+                                RedirectStandardError = true,
+                                RedirectStandardOutput = true
+                            }
+                        };
+
+                        errorOutput = new StringBuilder();
+                        mergeProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) Debug.WriteLine("[FFmpeg Final Merge Output] " + ev.Data); };
+                        mergeProcess.ErrorDataReceived += (s, ev) => { if (ev.Data != null) errorOutput.AppendLine(ev.Data); };
+
+                        mergeProcess.Start();
+                        mergeProcess.BeginOutputReadLine();
+                        mergeProcess.BeginErrorReadLine();
+                        mergeProcess.WaitForExit(15000);
+
+                        if (mergeProcess.ExitCode != 0)
+                        {
+                            System.Windows.MessageBox.Show($"Error combining video and audio: {errorOutput.ToString()}");
+                            return;
+                        }
+
+                        if (!File.Exists(outputFilePath) || new FileInfo(outputFilePath).Length == 0)
+                        {
+                            System.Windows.MessageBox.Show("Final output file is invalid or empty.");
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Windows.MessageBox.Show($"Error merging audio segments: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    // No audio, just copy video
+                    File.Copy(tempVideoFile, outputFilePath, true);
                 }
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show("Error merging segments: " + ex.Message);
+                System.Windows.MessageBox.Show($"Error merging segments: {ex.Message}");
             }
             finally
             {
@@ -698,7 +788,7 @@ namespace ScreenRecorder
             }
         }
 
-        private void BtnStop_Click(object sender, RoutedEventArgs e)
+        private async void BtnStop_Click(object sender, RoutedEventArgs e)
         {
             if (ffmpegProcess != null && !ffmpegProcess.HasExited)
             {
@@ -713,14 +803,26 @@ namespace ScreenRecorder
                     ffmpegProcess.Dispose();
                     ffmpegProcess = null;
 
-                    if (segmentFiles.Count > 0)
+                    audioCts?.Cancel();
+                    await StopAudioRecordingAsync();
+
+                    if (videoSegmentFiles.Count > 0)
                     {
-                        string lastSegment = segmentFiles[segmentFiles.Count - 1];
+                        string lastVideoSegment = videoSegmentFiles[videoSegmentFiles.Count - 1];
                         TimeSpan segmentDuration = DateTime.Now - startTime + pausedTime;
-                        if (!File.Exists(lastSegment) || new FileInfo(lastSegment).Length == 0 || segmentDuration.TotalSeconds < 2)
+                        if (!File.Exists(lastVideoSegment) || new FileInfo(lastVideoSegment).Length == 0 || segmentDuration.TotalSeconds < 2)
                         {
-                            Debug.WriteLine($"Invalid segment file: {lastSegment} (Duration: {segmentDuration.TotalSeconds}s, Size: {new FileInfo(lastSegment).Length} bytes)");
-                            segmentFiles.RemoveAt(segmentFiles.Count - 1);
+                            Debug.WriteLine($"Invalid video segment file: {lastVideoSegment} (Duration: {segmentDuration.TotalSeconds}s, Size: {new FileInfo(lastVideoSegment).Length} bytes)");
+                            videoSegmentFiles.RemoveAt(videoSegmentFiles.Count - 1);
+                            if (audioSegmentFiles.Count > 0)
+                            {
+                                string lastAudioSegment = audioSegmentFiles[audioSegmentFiles.Count - 1];
+                                if (!File.Exists(lastAudioSegment) || new FileInfo(lastAudioSegment).Length == 0)
+                                {
+                                    Debug.WriteLine($"Invalid audio segment file: {lastAudioSegment} (Size: {new FileInfo(lastAudioSegment).Length} bytes)");
+                                    audioSegmentFiles.RemoveAt(audioSegmentFiles.Count - 1);
+                                }
+                            }
                             segmentCount--;
                         }
                     }
@@ -756,7 +858,8 @@ namespace ScreenRecorder
             btnPause.Content = "⏸ Pause";
             isPaused = false;
             pausedTime = TimeSpan.Zero;
-            segmentFiles.Clear();
+            videoSegmentFiles.Clear();
+            audioSegmentFiles.Clear();
             segmentCount = 0;
             tempDir = null;
         }
@@ -776,6 +879,7 @@ namespace ScreenRecorder
     {
         public string BasePath { get; set; }
         public string AudioSourceType { get; set; }
-        public string SelectedDevice { get; set; }
+        public string SystemAudioDevice { get; set; }
+        public string MicAudioDevice { get; set; }
     }
 }

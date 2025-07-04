@@ -1,5 +1,6 @@
 {
   "BasePath": "H:\\Study\\Projects\\ScreenRecorder\\Testing",
-  "AudioSourceType": "system",
-  "SelectedDevice": "Speakers (Realtek(R) Audio)"
+  "AudioSourceType": "both",
+  "SystemAudioDevice": "Speakers (Realtek(R) Audio)",
+  "MicAudioDevice": "Virtual Mic (Virtual Mic for AudioRelay)"
 }

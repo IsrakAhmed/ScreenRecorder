@@ -26,3 +26,4 @@ H:\Study\Projects\ScreenRecorder\ScreenRecorder\bin\Debug\net8.0-windows\NAudio.
 H:\Study\Projects\ScreenRecorder\ScreenRecorder\bin\Debug\net8.0-windows\NAudio.WinForms.dll
 H:\Study\Projects\ScreenRecorder\ScreenRecorder\bin\Debug\net8.0-windows\NAudio.WinMM.dll
 H:\Study\Projects\ScreenRecorder\ScreenRecorder\obj\Debug\net8.0-windows\ScreenRe.D65604CB.Up2Date
+H:\Study\Projects\ScreenRecorder\ScreenRecorder\obj\Debug\net8.0-windows\ScreenRecorder.sourcelink.json
