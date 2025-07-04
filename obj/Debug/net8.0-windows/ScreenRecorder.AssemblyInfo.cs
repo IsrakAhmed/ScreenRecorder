@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ScreenRecorder")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f42d73f934124d00ff20b82c838b2b457856f57e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c3258aaea028717dcf98cc7c1b0df19e9af53f17")]
 [assembly: System.Reflection.AssemblyProductAttribute("ScreenRecorder")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ScreenRecorder")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

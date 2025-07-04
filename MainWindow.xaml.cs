@@ -295,6 +295,7 @@ namespace ScreenRecorder
 
                 if (audioSourceType == "mic")
                 {
+                    // [Unchanged mic-only code]
                     micCapture = new WasapiCapture(micDevice) { WaveFormat = targetFormat, ShareMode = AudioClientShareMode.Shared };
                     micBuffer = new BufferedWaveProvider(micCapture.WaveFormat)
                     {
@@ -319,8 +320,7 @@ namespace ScreenRecorder
                             Debug.WriteLine($"First non-silent audio sample at {firstAudioSampleTime:O}, {(firstAudioSampleTime - audioCaptureStartTime).TotalSeconds:F2}s after start");
                         }
                         Debug.WriteLine($"Microphone data received at {DateTime.Now:O}: {a.BytesRecorded} bytes, Max amplitude: {maxAmplitude:F3}");
-                        if (isAudioSignificant)
-                            micBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                        micBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
                     };
 
                     micCapture.StartRecording();
@@ -338,22 +338,15 @@ namespace ScreenRecorder
                                     Debug.WriteLine($"Waiting for mic buffer: {micBuffer.BufferedBytes} bytes");
                                     Thread.Sleep(10);
                                 }
-                                if (isAudioSignificant)
+                                int bytesRead = micBuffer.Read(buffer, 0, buffer.Length);
+                                if (bytesRead > 0)
                                 {
-                                    int bytesRead = micBuffer.Read(buffer, 0, buffer.Length);
-                                    if (bytesRead > 0)
-                                    {
-                                        audioWriter.Write(buffer, 0, bytesRead);
-                                        Debug.WriteLine($"Wrote {bytesRead} bytes from mic buffer to audio file");
-                                    }
-                                    else
-                                    {
-                                        Debug.WriteLine($"No mic buffer data available: {micBuffer.BufferedBytes} bytes");
-                                        Thread.Sleep(50);
-                                    }
+                                    audioWriter.Write(buffer, 0, bytesRead);
+                                    Debug.WriteLine($"Wrote {bytesRead} bytes from mic buffer to audio file");
                                 }
                                 else
                                 {
+                                    Debug.WriteLine($"No mic buffer data available: {micBuffer.BufferedBytes} bytes");
                                     Thread.Sleep(50);
                                 }
                             }
@@ -366,6 +359,7 @@ namespace ScreenRecorder
                 }
                 else if (audioSourceType == "system")
                 {
+                    // [Unchanged system-only code]
                     desktopCapture = new WasapiLoopbackCapture(desktopDevice) { WaveFormat = targetFormat, ShareMode = AudioClientShareMode.Shared };
                     desktopBuffer = new BufferedWaveProvider(desktopCapture.WaveFormat)
                     {
@@ -390,8 +384,7 @@ namespace ScreenRecorder
                             Debug.WriteLine($"First non-silent audio sample at {firstAudioSampleTime:O}, {(firstAudioSampleTime - audioCaptureStartTime).TotalSeconds:F2}s after start");
                         }
                         Debug.WriteLine($"Desktop data received at {DateTime.Now:O}: {a.BytesRecorded} bytes, Max amplitude: {maxAmplitude:F3}");
-                        if (isAudioSignificant)
-                            desktopBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                        desktopBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
                     };
 
                     desktopCapture.StartRecording();
@@ -409,22 +402,15 @@ namespace ScreenRecorder
                                     Debug.WriteLine($"Waiting for desktop buffer: {desktopBuffer.BufferedBytes} bytes");
                                     Thread.Sleep(10);
                                 }
-                                if (isAudioSignificant)
+                                int bytesRead = desktopBuffer.Read(buffer, 0, buffer.Length);
+                                if (bytesRead > 0)
                                 {
-                                    int bytesRead = desktopBuffer.Read(buffer, 0, buffer.Length);
-                                    if (bytesRead > 0)
-                                    {
-                                        audioWriter.Write(buffer, 0, bytesRead);
-                                        Debug.WriteLine($"Wrote {bytesRead} bytes from desktop buffer to audio file");
-                                    }
-                                    else
-                                    {
-                                        Debug.WriteLine($"No desktop buffer data available: {desktopBuffer.BufferedBytes} bytes");
-                                        Thread.Sleep(50);
-                                    }
+                                    audioWriter.Write(buffer, 0, bytesRead);
+                                    Debug.WriteLine($"Wrote {bytesRead} bytes from desktop buffer to audio file");
                                 }
                                 else
                                 {
+                                    Debug.WriteLine($"No desktop buffer data available: {desktopBuffer.BufferedBytes} bytes");
                                     Thread.Sleep(50);
                                 }
                             }
@@ -464,12 +450,10 @@ namespace ScreenRecorder
                         if (maxAmplitude > 0.02f && firstAudioSampleTime == DateTime.MaxValue)
                         {
                             firstAudioSampleTime = DateTime.Now;
-                            isAudioSignificant = true;
-                            Debug.WriteLine($"First non-silent audio sample at {firstAudioSampleTime:O}, {(firstAudioSampleTime - audioCaptureStartTime).TotalSeconds:F2}s after start");
+                            Debug.WriteLine($"First non-silent audio sample (mic) at {firstAudioSampleTime:O}, {(firstAudioSampleTime - audioCaptureStartTime).TotalSeconds:F2}s after start");
                         }
                         Debug.WriteLine($"Microphone data received at {DateTime.Now:O}: {a.BytesRecorded} bytes, Max amplitude: {maxAmplitude:F3}");
-                        if (isAudioSignificant)
-                            micBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                        micBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
                     };
 
                     desktopCapture.DataAvailable += (s, a) =>
@@ -483,12 +467,10 @@ namespace ScreenRecorder
                         if (maxAmplitude > 0.02f && firstAudioSampleTime == DateTime.MaxValue)
                         {
                             firstAudioSampleTime = DateTime.Now;
-                            isAudioSignificant = true;
-                            Debug.WriteLine($"First non-silent audio sample at {firstAudioSampleTime:O}, {(firstAudioSampleTime - audioCaptureStartTime).TotalSeconds:F2}s after start");
+                            Debug.WriteLine($"First non-silent audio sample (desktop) at {firstAudioSampleTime:O}, {(firstAudioSampleTime - audioCaptureStartTime).TotalSeconds:F2}s after start");
                         }
                         Debug.WriteLine($"Desktop data received at {DateTime.Now:O}: {a.BytesRecorded} bytes, Max amplitude: {maxAmplitude:F3}");
-                        if (isAudioSignificant)
-                            desktopBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
+                        desktopBuffer.AddSamples(a.Buffer, 0, a.BytesRecorded);
                     };
 
                     micCapture.StartRecording();
@@ -504,110 +486,127 @@ namespace ScreenRecorder
                     var micSamples = new float[floatBuffer.Length];
                     var desktopSamples = new float[floatBuffer.Length];
 
+                    // Track total samples written for duration calculation
+                    long totalSamplesWritten = 0;
+                    DateTime lastMixTime = DateTime.Now;
+
                     while (!token.IsCancellationRequested)
                     {
                         try
                         {
-                            while ((micBuffer.BufferedBytes < 3840 || desktopBuffer.BufferedBytes < 3840) && !token.IsCancellationRequested)
+                            // Wait for at least one buffer to have data, with a timeout
+                            DateTime waitStart = DateTime.Now;
+                            while ((micBuffer.BufferedBytes < 3840 && desktopBuffer.BufferedBytes < 3840) && !token.IsCancellationRequested)
                             {
+                                if ((DateTime.Now - waitStart).TotalSeconds > 1)
+                                {
+                                    Debug.WriteLine($"Buffer wait timeout - Mic: {micBuffer.BufferedBytes} bytes, Desktop: {desktopBuffer.BufferedBytes} bytes");
+                                    break;
+                                }
                                 Debug.WriteLine($"Waiting for buffer - Mic: {micBuffer.BufferedBytes} bytes, Desktop: {desktopBuffer.BufferedBytes} bytes");
                                 await Task.Delay(10, token);
                             }
-                            if (isAudioSignificant)
-                            {
-                                int micRead = micProvider.Read(micSamples, 0, floatBuffer.Length);
-                                int desktopRead = desktopProvider.Read(desktopSamples, 0, floatBuffer.Length);
-                                Debug.WriteLine($"Individual reads - Mic: {micRead} samples, Desktop: {desktopRead} samples");
 
-                                float maxMicAmplitude = 0f;
-                                float maxDesktopAmplitude = 0f;
-                                for (int i = 0; i < micRead; i++)
-                                    maxMicAmplitude = Math.Max(maxMicAmplitude, Math.Abs(micSamples[i]));
-                                for (int i = 0; i < desktopRead; i++)
-                                    maxDesktopAmplitude = Math.Max(maxDesktopAmplitude, Math.Abs(desktopSamples[i]));
-                                Debug.WriteLine($"Max amplitudes - Mic: {maxMicAmplitude:F3}, Desktop: {maxDesktopAmplitude:F3}");
+                            int micRead = micProvider.Read(micSamples, 0, floatBuffer.Length);
+                            int desktopRead = desktopProvider.Read(desktopSamples, 0, floatBuffer.Length);
+                            Debug.WriteLine($"Individual reads - Mic: {micRead} samples, Desktop: {desktopRead} samples");
 
-                                int samplesToMix = Math.Min(micRead, desktopRead);
-                                if (samplesToMix > 0)
-                                {
-                                    for (int i = 0; i < samplesToMix; i++)
-                                    {
-                                        float micSample = Math.Abs(micSamples[i]) > noiseGateThreshold ? micSamples[i] : 0f;
-                                        float desktopSample = Math.Abs(desktopSamples[i]) > noiseGateThreshold ? desktopSamples[i] : 0f;
-                                        float mixedSample = (MicGain * micSample + DesktopGain * desktopSample) / 2.0f;
-                                        floatBuffer[i] = Math.Max(-1.0f, Math.Min(1.0f, mixedSample));
-                                    }
-                                    audioWriter.WriteSamples(floatBuffer, 0, samplesToMix);
-                                    Debug.WriteLine($"Mixed {samplesToMix} samples, Microphone buffer: {micBuffer.BufferedBytes} bytes, Desktop buffer: {desktopBuffer.BufferedBytes} bytes");
-                                }
-                                else
-                                {
-                                    Debug.WriteLine($"No samples available (Mic: {micRead}, Desktop: {desktopRead}), Microphone buffer: {micBuffer.BufferedBytes} bytes, Desktop buffer: {desktopBuffer.BufferedBytes} bytes");
-                                    await Task.Delay(50, token);
-                                }
-                            }
-                            else
+                            float maxMicAmplitude = 0f;
+                            float maxDesktopAmplitude = 0f;
+                            for (int i = 0; i < micRead; i++)
+                                maxMicAmplitude = Math.Max(maxMicAmplitude, Math.Abs(micSamples[i]));
+                            for (int i = 0; i < desktopRead; i++)
+                                maxDesktopAmplitude = Math.Max(maxDesktopAmplitude, Math.Abs(desktopSamples[i]));
+                            Debug.WriteLine($"Max amplitudes - Mic: {maxMicAmplitude:F3}, Desktop: {maxDesktopAmplitude:F3}");
+
+                            // Use the maximum number of samples available, or generate silence if none
+                            int samplesToMix = Math.Max(micRead, desktopRead);
+                            if (samplesToMix == 0)
                             {
-                                await Task.Delay(50, token);
+                                // Generate silence for 20ms (960 samples at 48000 Hz)
+                                samplesToMix = targetFormat.SampleRate / 50;
+                                Array.Clear(micSamples, 0, micSamples.Length);
+                                Array.Clear(desktopSamples, 0, desktopSamples.Length);
+                                Debug.WriteLine($"No samples available, generating {samplesToMix} silence samples");
                             }
+
+                            for (int i = 0; i < samplesToMix; i++)
+                            {
+                                float micSample = i < micRead ? micSamples[i] : 0f;
+                                float desktopSample = i < desktopRead ? desktopSamples[i] : 0f;
+                                // Apply noise gate only to non-zero samples
+                                if (Math.Abs(micSample) < noiseGateThreshold && micRead > 0)
+                                    micSample = 0f;
+                                if (Math.Abs(desktopSample) < noiseGateThreshold && desktopRead > 0)
+                                    desktopSample = 0f;
+                                float mixedSample = (MicGain * micSample + DesktopGain * desktopSample) / 2.0f;
+                                floatBuffer[i] = Math.Max(-1.0f, Math.Min(1.0f, mixedSample));
+                            }
+
+                            audioWriter.WriteSamples(floatBuffer, 0, samplesToMix);
+                            totalSamplesWritten += samplesToMix;
+                            Debug.WriteLine($"Mixed {samplesToMix} samples, Total samples written: {totalSamplesWritten}, Microphone buffer: {micBuffer.BufferedBytes} bytes, Desktop buffer: {desktopBuffer.BufferedBytes} bytes, Elapsed: {(DateTime.Now - lastMixTime).TotalSeconds:F3}s");
+                            lastMixTime = DateTime.Now;
                         }
                         catch (Exception ex)
                         {
                             Debug.WriteLine($"Error in mixing loop: {ex.Message}");
+                            if (token.IsCancellationRequested)
+                                break;
                         }
                     }
-                }
 
-                // Add timestamp to audio file metadata
-                if (isAudioSignificant && File.Exists(audioSegmentFile) && new FileInfo(audioSegmentFile).Length > 0)
-                {
-                    string tempAudioFile = audioSegmentFile + ".temp.wav";
-                    double audioOffset = (firstAudioSampleTime != DateTime.MaxValue) ? (firstAudioSampleTime - audioCaptureStartTime).TotalSeconds : 0;
-                    string ffmpegArgs = $"-y -i \"{audioSegmentFile}\" -c copy -metadata:s:a creation_time=\"{audioCaptureStartTime:O}\" -metadata:s:a start_time=\"{audioOffset}\" \"{tempAudioFile}\"";
-                    var process = new Process
+                    // Add timestamp to audio file metadata
+                    if (File.Exists(audioSegmentFile) && new FileInfo(audioSegmentFile).Length > 0)
                     {
-                        StartInfo = new ProcessStartInfo
+                        string tempAudioFile = audioSegmentFile + ".temp.wav";
+                        double audioOffset = (firstAudioSampleTime != DateTime.MaxValue) ? (firstAudioSampleTime - audioCaptureStartTime).TotalSeconds : 0;
+                        string ffmpegArgs = $"-y -i \"{audioSegmentFile}\" -c copy -metadata:s:a creation_time=\"{audioCaptureStartTime:O}\" -metadata:s:a start_time=\"{audioOffset}\" \"{tempAudioFile}\"";
+                        var process = new Process
                         {
-                            FileName = "ffmpeg",
-                            Arguments = ffmpegArgs,
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                            RedirectStandardError = true,
-                            RedirectStandardOutput = true
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = "ffmpeg",
+                                Arguments = ffmpegArgs,
+                                UseShellExecute = false,
+                                CreateNoWindow = true,
+                                RedirectStandardError = true,
+                                RedirectStandardOutput = true
+                            }
+                        };
+                        process.Start();
+                        process.WaitForExit(5000);
+                        if (process.ExitCode == 0)
+                        {
+                            File.Delete(audioSegmentFile);
+                            File.Move(tempAudioFile, audioSegmentFile);
+                            Debug.WriteLine($"Added timestamp to audio segment: {audioSegmentFile}, creation_time={audioCaptureStartTime:O}, start_time={audioOffset:F2}s");
                         }
-                    };
-                    process.Start();
-                    process.WaitForExit(5000);
-                    if (process.ExitCode == 0)
-                    {
-                        File.Delete(audioSegmentFile);
-                        File.Move(tempAudioFile, audioSegmentFile);
-                        Debug.WriteLine($"Added timestamp to audio segment: {audioSegmentFile}, creation_time={audioCaptureStartTime:O}, start_time={audioOffset:F2}s");
-                    }
-                    else
-                    {
-                        Debug.WriteLine($"Failed to add timestamp to audio segment: {audioSegmentFile}");
-                    }
-                    process.Dispose();
+                        else
+                        {
+                            Debug.WriteLine($"Failed to add timestamp to audio segment: {audioSegmentFile}");
+                        }
+                        process.Dispose();
 
-                    // Log audio segment info
-                    string ffprobeArgs = $"-i \"{audioSegmentFile}\" -show_streams -print_format json";
-                    var audioProbeProcess = new Process
-                    {
-                        StartInfo = new ProcessStartInfo
+                        // Log audio segment info
+                        string ffprobeArgs = $"-i \"{audioSegmentFile}\" -show_streams -print_format json";
+                        var audioProbeProcess = new Process
                         {
-                            FileName = "ffprobe",
-                            Arguments = ffprobeArgs,
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true
-                        }
-                    };
-                    audioProbeProcess.Start();
-                    string audioOutput = audioProbeProcess.StandardOutput.ReadToEnd();
-                    audioProbeProcess.WaitForExit();
-                    Debug.WriteLine($"Audio segment {audioSegmentFile} info: {audioOutput}");
+                            StartInfo = new ProcessStartInfo
+                            {
+                                FileName = "ffprobe",
+                                Arguments = ffprobeArgs,
+                                UseShellExecute = false,
+                                CreateNoWindow = true,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true
+                            }
+                        };
+                        audioProbeProcess.Start();
+                        string audioOutput = audioProbeProcess.StandardOutput.ReadToEnd();
+                        audioProbeProcess.WaitForExit();
+                        Debug.WriteLine($"Audio segment {audioSegmentFile} info: {audioOutput}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -634,14 +633,14 @@ namespace ScreenRecorder
             if (audioWriter != null)
             {
                 // Flush buffered samples
-                if (micBuffer != null && micBuffer.BufferedBytes > 0 && isAudioSignificant)
+                if (micBuffer != null && micBuffer.BufferedBytes > 0)
                 {
                     byte[] buffer = new byte[micBuffer.BufferedBytes];
                     micBuffer.Read(buffer, 0, buffer.Length);
                     audioWriter.Write(buffer, 0, buffer.Length);
                     Debug.WriteLine($"Flushed {buffer.Length} bytes from mic buffer");
                 }
-                if (desktopBuffer != null && desktopBuffer.BufferedBytes > 0 && isAudioSignificant)
+                if (desktopBuffer != null && desktopBuffer.BufferedBytes > 0)
                 {
                     byte[] buffer = new byte[desktopBuffer.BufferedBytes];
                     desktopBuffer.Read(buffer, 0, buffer.Length);
@@ -650,7 +649,7 @@ namespace ScreenRecorder
                 }
 
                 // Pad audio to match video duration
-                if (videoSegmentFiles.Count > 0 && isAudioSignificant)
+                if (videoSegmentFiles.Count > 0)
                 {
                     string videoSegment = videoSegmentFiles[videoSegmentFiles.Count - 1];
                     double videoDuration = GetMediaDuration(videoSegment);
